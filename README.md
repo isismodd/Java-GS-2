@@ -5,7 +5,7 @@ adicionar os endpoints depois da url
 Exemplos 
 
 inserir colaborador:
-POST | https://java-gs-2.onrender.com/colaborador
+POST | https://java-gs-2.onrender.com/colaboradores
 
 Lista todos os colaboradores cadastrados:
 GET | https://java-gs-2.onrender.com/colaboradores
