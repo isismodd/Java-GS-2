@@ -14,9 +14,7 @@ public class EquipeBO {
     private ColaboradorDAO colaboradorDAO = new ColaboradorDAO();
     private ProjetoDAO projetoDAO = new ProjetoDAO();
 
-    /**
-     * Aplica a mesma lógica de pontuação do Python
-     */
+ 
     private double calcularScore(ColaboradorTO colab, ProjetoTO projeto) {
         double score = 0;
 
@@ -30,7 +28,7 @@ public class EquipeBO {
         // Bônus por experiência
         score += colab.getExperiencia() * 2;
 
-        // Bônus por personalidade (equivalência simbólica)
+        // Bônus por personalidade
         if (colab.getPersonalidade().equalsIgnoreCase(projeto.getPersonalidadeDesejada())) {
             score += 8;
         }
@@ -61,15 +59,14 @@ public class EquipeBO {
                 .limit(projeto.getQuantidadeIdeal())
                 .collect(Collectors.toList());
 
-        // >> CORREÇÃO PARA O TESTE test3_formarEquipeColaboradoresInsuficientes <<
         // Verifica se a quantidade de membros escolhidos atende ao mínimo exigido pelo projeto.
         if (escolhidos.size() < projeto.getMinMembros()) {
             // Se a quantidade for insuficiente, retorna null.
-            // O EquipeResource transformará isso em status 404 (ou 400/404 conforme seu teste espera).
+            // O EquipeResource transformará isso em status 404
             return null;
         }
 
-        // Montar objeto final (somente se o mínimo for atendido)
+        // Montar objeto final 
         EquipeTO equipe = new EquipeTO();
         equipe.setProjeto(projeto);
         equipe.setIntegrantes(escolhidos);
