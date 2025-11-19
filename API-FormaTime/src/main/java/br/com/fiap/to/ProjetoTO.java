@@ -13,7 +13,7 @@ public class ProjetoTO {
     @NotBlank(message = "A descrição do projeto é obrigatória.")
     private String descricao;
 
-    // ---- CAMPOS DO SEU MODELO ORIGINAL ----
+
     @NotNull(message = "A complexidade é obrigatória.")
     @Min(1)
     @Max(5)
@@ -26,7 +26,7 @@ public class ProjetoTO {
     @NotBlank(message = "A skill principal requerida é obrigatória.")
     private String skillPrincipalRequerida;
 
-    // ---- CAMPOS EXIGIDOS PELO BO E DAO ----
+    
     @NotNull(message = "A quantidade ideal é obrigatória.")
     @Min(value = 1, message = "A equipe deve ter pelo menos um membro.")
     private Integer quantidadeIdeal;
