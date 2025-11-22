@@ -10,7 +10,11 @@ public class ColaboradorDAO {
 
     private final String TABLE_NAME = "COLABORADOR";
 
-
+    /**
+     * Converte o ResultSet em um objeto ColaboradorTO.
+     * Não precisa mais receber a conexão, pois o carregamento das habilidades
+     * será feito em uma conexão separada.
+     */
     private ColaboradorTO mapResultSetToTO(ResultSet rs) throws SQLException {
         ColaboradorTO colab = new ColaboradorTO();
 
@@ -20,6 +24,7 @@ public class ColaboradorDAO {
         colab.setPersonalidade(rs.getString("personalidade"));
         colab.setExperiencia(rs.getInt("experiencia"));
 
+        // Carregar habilidades chamando o método que agora abre sua própria conexão
         colab.setHabilidades(findHabilidadesByColaborador(colab.getId()));
 
         return colab;
@@ -27,7 +32,7 @@ public class ColaboradorDAO {
 
     /**
      * Carrega habilidades do colaborador.
-     * Gerencia e fecha sua própria conexão.
+     * ⚠️ Abre e fecha sua própria conexão para isolar a transação.
      */
     public List<String> findHabilidadesByColaborador(Long idColaborador) {
         List<String> habilidades = new ArrayList<>();
@@ -40,10 +45,9 @@ public class ColaboradorDAO {
         """;
 
         try (
-            Connection con = ConnectionFactory.getConnection();
+            Connection con = ConnectionFactory.getConnection(); // Abre nova conexão
             PreparedStatement ps = con.prepareStatement(sql)
         ) {
-
             ps.setLong(1, idColaborador);
 
             try (ResultSet rs = ps.executeQuery()) {
@@ -51,80 +55,13 @@ public class ColaboradorDAO {
                     habilidades.add(rs.getString("nome"));
                 }
             }
-
         } catch (SQLException e) {
-            System.out.println("Erro ao buscar habilidades: " + e.getMessage());
+            // Este erro não deve mais interromper o findAll
+            System.out.println("Erro ao buscar habilidades: " + e.getMessage()); 
         }
 
         return habilidades;
     }
-    
-    // --- LÓGICA DE PERSISTÊNCIA DE HABILIDADES ---
-
-    /**
-     * Verifica se a habilidade existe na tabela HABILIDADE.
-     * Se existir, retorna o ID. Se não, insere e retorna o ID gerado.
-     * Usa a mesma conexão da transação principal (con).
-     */
-    private Long getOrCreateHabilidadeId(String nomeHabilidade, Connection con) throws SQLException {
-        
-        // 1. Tentar buscar ID (verificar se já existe)
-        String selectSql = "SELECT id_habilidade FROM HABILIDADE WHERE nome = ?";
-        try (PreparedStatement ps = con.prepareStatement(selectSql)) {
-            ps.setString(1, nomeHabilidade);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getLong("id_habilidade"); // Habilidade encontrada
-                }
-            }
-        }
-
-        // 2. Se não existir, inserir e retornar o ID
-        String insertSql = "INSERT INTO HABILIDADE (nome) VALUES (?)";
-        try (PreparedStatement ps = con.prepareStatement(insertSql, new String[]{"id_habilidade"})) {
-            ps.setString(1, nomeHabilidade);
-            if (ps.executeUpdate() > 0) {
-                try (ResultSet rs = ps.getGeneratedKeys()) {
-                    if (rs.next()) {
-                        return rs.getLong(1); // ID da nova habilidade
-                    }
-                }
-            }
-        }
-        // Se chegar aqui, houve uma falha inesperada
-        throw new SQLException("Falha grave ao criar ou buscar ID da habilidade: " + nomeHabilidade);
-    }
-    
-    /**
-     * Salva habilidades do colaborador. 
-     */
-    private void saveHabilidades(ColaboradorTO colab, Connection con) throws SQLException {
-
-        if (colab.getHabilidades() == null) return;
-
-        String delete = "DELETE FROM COLABORADOR_HABILIDADE WHERE id_colaborador = ?";
-        String insert = "INSERT INTO COLABORADOR_HABILIDADE (id_colaborador, id_habilidade) VALUES (?, ?)";
-
-        // Remover habilidades antigas
-        try (PreparedStatement ps = con.prepareStatement(delete)) {
-            ps.setLong(1, colab.getId());
-            ps.executeUpdate();
-        }
-
-        // Inserir novas habilidades
-        for (String hab : colab.getHabilidades()) {
-            
-     
-            Long idHabilidade = getOrCreateHabilidadeId(hab, con); 
-
-            try (PreparedStatement ps = con.prepareStatement(insert)) {
-                ps.setLong(1, colab.getId());
-                ps.setLong(2, idHabilidade); // Usa o ID garantido
-                ps.executeUpdate();
-            }
-        }
-    }
-    
 
     /**
      * Buscar colaborador por ID
@@ -140,6 +77,7 @@ public class ColaboradorDAO {
 
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
+                    // mapResultSetToTO não recebe mais a conexão
                     return mapResultSetToTO(rs); 
                 }
             }
@@ -163,9 +101,9 @@ public class ColaboradorDAO {
                 PreparedStatement ps = con.prepareStatement(sql);
                 ResultSet rs = ps.executeQuery()
         ) {
-
-            while (rs.next()) {
-                lista.add(mapResultSetToTO(rs)); 
+            // O loop agora só depende da conexão 'con' do findAll
+            while (rs.next()) { 
+                lista.add(mapResultSetToTO(rs)); // mapResultSetToTO cuida das habilidades internamente
             }
 
         } catch (SQLException e) {
@@ -190,8 +128,7 @@ public class ColaboradorDAO {
                 Connection con = ConnectionFactory.getConnection();
                 PreparedStatement ps = con.prepareStatement(sql, new String[]{"id_colaborador"})
         ) {
-            con.setAutoCommit(false); // Inicia a transação
-            
+
             ps.setString(1, colab.getNome());
             ps.setInt(2, colab.getIdade());
             ps.setString(3, colab.getPersonalidade());
@@ -205,12 +142,8 @@ public class ColaboradorDAO {
                     }
                 }
 
-                saveHabilidades(colab, con); // Salva habilidades e cria se necessário
-                
-                con.commit();
+                saveHabilidades(colab, con);
                 return colab;
-            } else {
-                 con.rollback();
             }
 
         } catch (SQLException e) {
@@ -221,7 +154,36 @@ public class ColaboradorDAO {
     }
 
     /**
-     * Atualiza colaborador (Com transação)
+     * Salva habilidades do colaborador usando a MESMA CONEXÃO recebida
+     */
+    private void saveHabilidades(ColaboradorTO colab, Connection con) throws SQLException {
+
+        if (colab.getHabilidades() == null) return;
+
+        String delete = "DELETE FROM COLABORADOR_HABILIDADE WHERE id_colaborador = ?";
+        String insert = """
+            INSERT INTO COLABORADOR_HABILIDADE (id_colaborador, id_habilidade)
+            SELECT ?, id_habilidade FROM HABILIDADE WHERE nome = ?
+        """;
+
+        // Remover habilidades antigas
+        try (PreparedStatement ps = con.prepareStatement(delete)) {
+            ps.setLong(1, colab.getId());
+            ps.executeUpdate();
+        }
+
+        // Inserir novas habilidades
+        for (String hab : colab.getHabilidades()) {
+            try (PreparedStatement ps = con.prepareStatement(insert)) {
+                ps.setLong(1, colab.getId());
+                ps.setString(2, hab);
+                ps.executeUpdate();
+            }
+        }
+    }
+
+    /**
+     * Atualiza colaborador
      */
     public ColaboradorTO update(ColaboradorTO colab) {
         String sql = """
@@ -234,8 +196,6 @@ public class ColaboradorDAO {
                 Connection con = ConnectionFactory.getConnection();
                 PreparedStatement ps = con.prepareStatement(sql)
         ) {
-            con.setAutoCommit(false);
-            
             ps.setString(1, colab.getNome());
             ps.setInt(2, colab.getIdade());
             ps.setString(3, colab.getPersonalidade());
@@ -244,10 +204,7 @@ public class ColaboradorDAO {
 
             if (ps.executeUpdate() > 0) {
                 saveHabilidades(colab, con);
-                con.commit();
                 return colab;
-            } else {
-                 con.rollback();
             }
 
         } catch (SQLException e) {
@@ -258,7 +215,7 @@ public class ColaboradorDAO {
     }
 
     /**
-     * Excluir colaborador (Com transação)
+     * Excluir colaborador
      */
     public boolean delete(Long id) {
 
@@ -266,8 +223,7 @@ public class ColaboradorDAO {
         String sql = "DELETE FROM COLABORADOR WHERE id_colaborador = ?";
 
         try (Connection con = ConnectionFactory.getConnection()) {
-            con.setAutoCommit(false);
-            
+
             try (PreparedStatement psHab = con.prepareStatement(sqlHab)) {
                 psHab.setLong(1, id);
                 psHab.executeUpdate();
@@ -275,13 +231,8 @@ public class ColaboradorDAO {
 
             try (PreparedStatement ps = con.prepareStatement(sql)) {
                 ps.setLong(1, id);
-                if (ps.executeUpdate() > 0) {
-                    con.commit();
-                    return true;
-                }
+                return ps.executeUpdate() > 0;
             }
-            
-            con.rollback();
 
         } catch (SQLException e) {
             System.out.println("Erro ao excluir colaborador: " + e.getMessage());
