@@ -11,28 +11,8 @@ public class ColaboradorDAO {
     private final String TABLE_NAME = "COLABORADOR";
 
     /**
-     * Converte o ResultSet em um objeto ColaboradorTO.
-     * Não precisa mais receber a conexão, pois o carregamento das habilidades
-     * será feito em uma conexão separada.
-     */
-    private ColaboradorTO mapResultSetToTO(ResultSet rs) throws SQLException {
-        ColaboradorTO colab = new ColaboradorTO();
-
-        colab.setId(rs.getLong("id_colaborador"));
-        colab.setNome(rs.getString("nome"));
-        colab.setIdade(rs.getInt("idade"));
-        colab.setPersonalidade(rs.getString("personalidade"));
-        colab.setExperiencia(rs.getInt("experiencia"));
-
-        // Carregar habilidades chamando o método que agora abre sua própria conexão
-        colab.setHabilidades(findHabilidadesByColaborador(colab.getId()));
-
-        return colab;
-    }
-
-    /**
      * Carrega habilidades do colaborador.
-     * ⚠️ Abre e fecha sua própria conexão para isolar a transação.
+     * Abre e fecha sua própria conexão (isolada).
      */
     public List<String> findHabilidadesByColaborador(Long idColaborador) {
         List<String> habilidades = new ArrayList<>();
@@ -45,7 +25,7 @@ public class ColaboradorDAO {
         """;
 
         try (
-            Connection con = ConnectionFactory.getConnection(); // Abre nova conexão
+            Connection con = ConnectionFactory.getConnection(); 
             PreparedStatement ps = con.prepareStatement(sql)
         ) {
             ps.setLong(1, idColaborador);
@@ -56,7 +36,6 @@ public class ColaboradorDAO {
                 }
             }
         } catch (SQLException e) {
-            // Este erro não deve mais interromper o findAll
             System.out.println("Erro ao buscar habilidades: " + e.getMessage()); 
         }
 
@@ -65,6 +44,7 @@ public class ColaboradorDAO {
 
     /**
      * Buscar colaborador por ID
+     * Faz o mapeamento e carrega habilidades no mesmo bloco.
      */
     public ColaboradorTO findById(Long id) {
         String sql = "SELECT * FROM " + TABLE_NAME + " WHERE id_colaborador = ?";
@@ -77,8 +57,16 @@ public class ColaboradorDAO {
 
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    // mapResultSetToTO não recebe mais a conexão
-                    return mapResultSetToTO(rs); 
+                    ColaboradorTO colab = new ColaboradorTO();
+                    colab.setId(rs.getLong("id_colaborador"));
+                    colab.setNome(rs.getString("nome"));
+                    colab.setIdade(rs.getInt("idade"));
+                    colab.setPersonalidade(rs.getString("personalidade"));
+                    colab.setExperiencia(rs.getInt("experiencia"));
+                    
+                    // Carrega habilidades APÓS fechar o ResultSet (evita ORA-17008)
+                    colab.setHabilidades(findHabilidadesByColaborador(colab.getId())); 
+                    return colab;
                 }
             }
 
@@ -90,27 +78,47 @@ public class ColaboradorDAO {
     }
 
     /**
-     * Listar todos os colaboradores
+     * Listar todos os colaboradores (Método Eager Loading)
+     * Resolve ORA-17008 garantindo que o ResultSet principal seja fechado rapidamente.
      */
     public List<ColaboradorTO> findAll() {
-        List<ColaboradorTO> lista = new ArrayList<>();
+        // 1. Armazena dados básicos (sem habilidades)
+        List<ColaboradorTO> colaboradoresBasicos = new ArrayList<>();
+        
+        // 2. Lista final, com habilidades
+        List<ColaboradorTO> listaFinal = new ArrayList<>(); 
+        
         String sql = "SELECT * FROM " + TABLE_NAME + " ORDER BY nome";
 
+        // PRIMEIRA FASE: Carregar dados básicos (Fechamento rápido do ResultSet)
         try (
                 Connection con = ConnectionFactory.getConnection();
                 PreparedStatement ps = con.prepareStatement(sql);
                 ResultSet rs = ps.executeQuery()
         ) {
-            // O loop agora só depende da conexão 'con' do findAll
             while (rs.next()) { 
-                lista.add(mapResultSetToTO(rs)); // mapResultSetToTO cuida das habilidades internamente
+                ColaboradorTO colab = new ColaboradorTO();
+                colab.setId(rs.getLong("id_colaborador"));
+                colab.setNome(rs.getString("nome"));
+                colab.setIdade(rs.getInt("idade"));
+                colab.setPersonalidade(rs.getString("personalidade"));
+                colab.setExperiencia(rs.getInt("experiencia"));
+                // Habilidades NULO neste momento
+                colaboradoresBasicos.add(colab);
             }
-
         } catch (SQLException e) {
-            System.out.println("Erro no findAll: " + e.getMessage());
+            System.out.println("Erro na leitura básica (findAll): " + e.getMessage());
+            return listaFinal;
         }
 
-        return lista;
+        // SEGUNDA FASE: Carregar habilidades para cada colaborador, usando novas conexões
+        for (ColaboradorTO colab : colaboradoresBasicos) {
+            // O findHabilidadesByColaborador abre e fecha sua própria conexão
+            colab.setHabilidades(findHabilidadesByColaborador(colab.getId()));
+            listaFinal.add(colab);
+        }
+
+        return listaFinal;
     }
 
     /**
@@ -154,7 +162,7 @@ public class ColaboradorDAO {
     }
 
     /**
-     * Salva habilidades do colaborador usando a MESMA CONEXÃO recebida
+     * Salva habilidades do colaborador usando a MESMA CONEXÃO recebida (para transação)
      */
     private void saveHabilidades(ColaboradorTO colab, Connection con) throws SQLException {
 
