@@ -11,10 +11,9 @@ public class ColaboradorDAO {
     private final String TABLE_NAME = "COLABORADOR";
 
     /**
-     * Converte o ResultSet em um objeto ColaboradorTO
-     * Agora recebe a conexão aberta para evitar erros
+     * Converte o ResultSet em um objeto ColaboradorTO.
      */
-    private ColaboradorTO mapResultSetToTO(ResultSet rs, Connection con) throws SQLException {
+    private ColaboradorTO mapResultSetToTO(ResultSet rs) throws SQLException {
         ColaboradorTO colab = new ColaboradorTO();
 
         colab.setId(rs.getLong("id_colaborador"));
@@ -23,16 +22,16 @@ public class ColaboradorDAO {
         colab.setPersonalidade(rs.getString("personalidade"));
         colab.setExperiencia(rs.getInt("experiencia"));
 
-        // Carregar habilidades usando a mesma conexão aberta
-        colab.setHabilidades(findHabilidadesByColaborador(colab.getId(), con));
+        // Carregar habilidades chamando o método que gerencia sua própria conexão
+        colab.setHabilidades(findHabilidadesByColaborador(colab.getId()));
 
         return colab;
     }
 
     /**
-     * Carrega habilidades do colaborador (usando a mesma conexão)
+     * Carrega habilidades do colaborador.
      */
-    public List<String> findHabilidadesByColaborador(Long idColaborador, Connection con) {
+    public List<String> findHabilidadesByColaborador(Long idColaborador) {
         List<String> habilidades = new ArrayList<>();
 
         String sql = """
@@ -42,8 +41,10 @@ public class ColaboradorDAO {
             WHERE ch.id_colaborador = ?
         """;
 
-        try (PreparedStatement ps = con.prepareStatement(sql)) {
-
+        try (
+            Connection con = ConnectionFactory.getConnection(); // Abre uma NOVA conexão
+            PreparedStatement ps = con.prepareStatement(sql)
+        ) {
             ps.setLong(1, idColaborador);
 
             try (ResultSet rs = ps.executeQuery()) {
@@ -73,7 +74,7 @@ public class ColaboradorDAO {
 
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    return mapResultSetToTO(rs, con);
+                    return mapResultSetToTO(rs); 
                 }
             }
 
@@ -98,7 +99,7 @@ public class ColaboradorDAO {
         ) {
 
             while (rs.next()) {
-                lista.add(mapResultSetToTO(rs, con));
+                lista.add(mapResultSetToTO(rs)); 
             }
 
         } catch (SQLException e) {
@@ -108,9 +109,7 @@ public class ColaboradorDAO {
         return lista;
     }
 
-    /**
-     * Salvar colaborador
-     */
+
     public ColaboradorTO save(ColaboradorTO colab) {
 
         String sql = """
@@ -124,6 +123,9 @@ public class ColaboradorDAO {
                 PreparedStatement ps = con.prepareStatement(sql, new String[]{"id_colaborador"})
         ) {
 
+            
+            con.setAutoCommit(false); 
+            
             ps.setString(1, colab.getNome());
             ps.setInt(2, colab.getIdade());
             ps.setString(3, colab.getPersonalidade());
@@ -138,7 +140,11 @@ public class ColaboradorDAO {
                 }
 
                 saveHabilidades(colab, con);
+                
+                con.commit(); // Confirma a transação se tudo deu certo
                 return colab;
+            } else {
+                 con.rollback();
             }
 
         } catch (SQLException e) {
@@ -148,13 +154,13 @@ public class ColaboradorDAO {
         return null;
     }
 
-    /**
-     * Salva habilidades do colaborador usando a MESMA CONEXÃO recebida
-     */
+   
     private void saveHabilidades(ColaboradorTO colab, Connection con) throws SQLException {
 
         if (colab.getHabilidades() == null) return;
 
+        
+        
         String delete = "DELETE FROM COLABORADOR_HABILIDADE WHERE id_colaborador = ?";
         String insert = """
             INSERT INTO COLABORADOR_HABILIDADE (id_colaborador, id_habilidade)
@@ -191,6 +197,8 @@ public class ColaboradorDAO {
                 Connection con = ConnectionFactory.getConnection();
                 PreparedStatement ps = con.prepareStatement(sql)
         ) {
+            con.setAutoCommit(false);
+            
             ps.setString(1, colab.getNome());
             ps.setInt(2, colab.getIdade());
             ps.setString(3, colab.getPersonalidade());
@@ -199,7 +207,10 @@ public class ColaboradorDAO {
 
             if (ps.executeUpdate() > 0) {
                 saveHabilidades(colab, con);
+                con.commit();
                 return colab;
+            } else {
+                 con.rollback();
             }
 
         } catch (SQLException e) {
@@ -218,21 +229,29 @@ public class ColaboradorDAO {
         String sql = "DELETE FROM COLABORADOR WHERE id_colaborador = ?";
 
         try (Connection con = ConnectionFactory.getConnection()) {
-
+            con.setAutoCommit(false);
+            
+            // 1. Excluir habilidades
             try (PreparedStatement psHab = con.prepareStatement(sqlHab)) {
                 psHab.setLong(1, id);
                 psHab.executeUpdate();
             }
 
+            // 2. Excluir colaborador
             try (PreparedStatement ps = con.prepareStatement(sql)) {
                 ps.setLong(1, id);
-                return ps.executeUpdate() > 0;
+                if (ps.executeUpdate() > 0) {
+                    con.commit();
+                    return true;
+                }
             }
+            
+            con.rollback(); // Se a exclusão do colaborador falhar
+            return false;
 
         } catch (SQLException e) {
             System.out.println("Erro ao excluir colaborador: " + e.getMessage());
+            return false;
         }
-
-        return false;
     }
 }
