@@ -53,15 +53,12 @@ public class ProjetoBO {
     }
 
 
-    /**
-     * Atualizar projeto
-     */
     public ProjetoTO update(ProjetoTO projeto) {
         if (projeto.getId() == null || projeto.getId() <= 0) {
             throw new IllegalArgumentException("ID inválido.");
         }
-        return save(projeto);
-    }
+        return projetoDAO.update(projeto); 
+        }
 
     /**
      * Excluir projeto
